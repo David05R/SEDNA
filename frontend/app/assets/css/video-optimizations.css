@@ -1,0 +1,195 @@
+/**
+ * Optimizaciones CSS para Streams de Video de Baja Latencia
+ *
+ * Este archivo contiene optimizaciones avanzadas para mejorar el rendimiento
+ * de los streams de video MJPEG en el navegador.
+ */
+
+/* ============================================
+   OPTIMIZACIONES GLOBALES DE RENDERIZADO
+   ============================================ */
+
+/* Forzar aceleración de hardware para todos los videos */
+img[src*="stream"],
+img[src*="action=stream"] {
+  /* GPU acceleration */
+  transform: translateZ(0);
+  will-change: auto;
+
+  /* Optimizar renderizado de imágenes */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+
+  /* Prevenir parpadeo durante actualizaciones */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+
+  /* Containment para aislar el rendering */
+  contain: layout style paint;
+
+  /* Content visibility para lazy rendering */
+  content-visibility: auto;
+}
+
+/* ============================================
+   OPTIMIZACIONES DE PERFORMANCE
+   ============================================ */
+
+/* Reducir repaints innecesarios en contenedores de video */
+.video-stream-container {
+  /* Aislar contenedor del resto del DOM */
+  isolation: isolate;
+
+  /* Hint al navegador sobre transformaciones */
+  will-change: contents;
+
+  /* Prevenir layout shifts */
+  contain: layout size;
+}
+
+/* Optimizar overlays sobre video */
+.video-overlay {
+  /* Usar composite layer separado */
+  will-change: opacity, transform;
+
+  /* Aceleración de hardware */
+  transform: translateZ(0);
+
+  /* Prevenir reflows */
+  contain: layout style paint;
+}
+
+/* ============================================
+   ANTI-FLICKERING Y SUAVIZADO
+   ============================================ */
+
+/* Transiciones suaves para cambios de opacidad */
+.video-stream-fade {
+  transition: opacity 0.15s ease-in-out;
+}
+
+/* Prevenir parpadeo blanco durante carga */
+img[src*="stream"] {
+  background-color: #171717; /* neutral-900 */
+  min-height: 100px; /* Prevenir colapso durante carga */
+}
+
+/* ============================================
+   OPTIMIZACIONES DE RED Y CACHÉ
+   ============================================ */
+
+/* Forzar re-fetch sin caché para streams */
+img[src*="stream"] {
+  /* Nota: esto se maneja mejor con parámetros URL en JS */
+}
+
+/* ============================================
+   RESPONSIVE Y ADAPTABILIDAD
+   ============================================ */
+
+/* Asegurar que videos mantengan aspect ratio */
+.video-aspect-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.video-aspect-container img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ============================================
+   LOADING Y ERROR STATES
+   ============================================ */
+
+/* Spinner de carga optimizado con GPU */
+@keyframes spin-gpu {
+  from {
+    transform: translateZ(0) rotate(0deg);
+  }
+  to {
+    transform: translateZ(0) rotate(360deg);
+  }
+}
+
+.video-loading-spinner {
+  animation: spin-gpu 1s linear infinite;
+  will-change: transform;
+}
+
+/* ============================================
+   OPTIMIZACIONES ESPECÍFICAS POR DISPOSITIVO
+   ============================================ */
+
+/* Móviles: reducir calidad de rendering si es necesario */
+@media (max-width: 768px) {
+  img[src*="stream"] {
+    /* Permitir mayor compresión en móviles */
+    image-rendering: auto;
+  }
+}
+
+/* Desktop: máxima calidad */
+@media (min-width: 1024px) {
+  img[src*="stream"] {
+    image-rendering: -webkit-optimize-contrast;
+  }
+}
+
+/* High DPI displays */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  img[src*="stream"] {
+    /* Optimizar para pantallas retina */
+    image-rendering: -webkit-optimize-contrast;
+  }
+}
+
+/* ============================================
+   MODO DE AHORRO DE ENERGÍA
+   ============================================ */
+
+/* Reducir rendering cuando no está visible */
+@media (prefers-reduced-motion: reduce) {
+  .video-stream-fade {
+    transition: none;
+  }
+}
+
+/* Modo de bajo consumo */
+@media (prefers-reduced-data: reduce) {
+  img[src*="stream"] {
+    /* El componente JS debería manejar calidad reducida */
+  }
+}
+
+/* ============================================
+   HINTS DE PERFORMANCE PARA EL NAVEGADOR
+   ============================================ */
+
+/* Containers principales de video */
+.video-main-container {
+  /* Maximum performance hints */
+  contain: strict;
+  content-visibility: auto;
+  contain-intrinsic-size: 640px 480px; /* Tamaño estimado */
+}
+
+/* ============================================
+   UTILIDADES ANTI-LATENCIA
+   ============================================ */
+
+/* Prevenir delays en interacciones */
+.no-delay {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Optimizar scroll para contenedores de video */
+.video-scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}

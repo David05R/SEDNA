@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* Optimizaciones para streams de video de baja latencia */
+@import "./video-optimizations.css";

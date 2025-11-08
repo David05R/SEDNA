@@ -1,0 +1,93 @@
+# ===================================
+# Git Ignore - Robot SEDNA
+# ===================================
+
+# ===================================
+# FRONTEND (Nuxt/Vue)
+# ===================================
+frontend/.nuxt
+frontend/.output
+frontend/.data
+frontend/.nitro
+frontend/.cache
+frontend/dist
+frontend/node_modules
+
+# ===================================
+# BACKEND (Python)
+# ===================================
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/*.pyd
+backend/.Python
+backend/pip-log.txt
+backend/pip-delete-this-directory.txt
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+
+# ===================================
+# VARIABLES DE ENTORNO
+# ===================================
+.env
+.env.*
+!.env.example
+
+# ===================================
+# LOGS
+# ===================================
+*.log
+logs/
+backend.log
+frontend.log
+
+# ===================================
+# SISTEMA OPERATIVO
+# ===================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ===================================
+# IDEs
+# ===================================
+.vscode/
+.idea/
+.fleet/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ===================================
+# TEMPORAL
+# ===================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# ===================================
+# NODE
+# ===================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# ===================================
+# CLOUDFLARE
+# ===================================
+.cloudflared/

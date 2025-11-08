@@ -1,0 +1,16 @@
+# Backend del Robot SEDNA
+# Framework: FastAPI (el más rápido para Python)
+
+# Core
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+websockets==14.1
+
+# Utilidades
+python-dotenv==1.0.1
+pydantic==2.10.3
+
+# Para control de hardware (descomentar según necesites)
+# RPi.GPIO==0.7.1  # Para Raspberry Pi
+# gpiod==2.2.1     # Para OrangePi con kernel moderno
+# pyserial==3.5    # Para comunicación serial
