@@ -7,6 +7,9 @@ export interface RobotControlData {
 
 export interface RobotState {
   battery: number // 0-100
+  battery_voltage: number // Voltaje real de batería
+  rpm_motor1: number // RPM encoder motor 1
+  rpm_motor2: number // RPM encoder motor 2
   gps: {
     lat: number
     lng: number
@@ -34,6 +37,9 @@ export const useRobotControl = () => {
   // Estado del robot recibido desde el WebSocket
   const robotState = ref<RobotState>({
     battery: 0,
+    battery_voltage: 0.0,
+    rpm_motor1: 0.0,
+    rpm_motor2: 0.0,
     gps: {
       lat: 10.342586,
       lng: -75.492847
@@ -97,10 +103,24 @@ export const useRobotControl = () => {
         try {
           const data = JSON.parse(event.data)
 
+          // Log para debug (temporal)
+          if (data.type === 'telemetry') {
+            console.log('📡 WebSocket telemetry recibida:', {
+              battery: data.robot_state?.battery,
+              voltage: data.robot_state?.battery_voltage,
+              rpm1: data.robot_state?.rpm_motor1,
+              rpm2: data.robot_state?.rpm_motor2,
+              timestamp: new Date().toLocaleTimeString()
+            })
+          }
+
           // Si es telemetría del WebSocket, actualizar estado
           if (data.type === 'telemetry' && data.robot_state) {
             robotState.value = {
               battery: data.robot_state.battery || 0,
+              battery_voltage: data.robot_state.battery_voltage || 0.0,
+              rpm_motor1: data.robot_state.rpm_motor1 || 0.0,
+              rpm_motor2: data.robot_state.rpm_motor2 || 0.0,
               gps: data.robot_state.gps || robotState.value.gps,
               speed: data.robot_state.speed || 0,
               operational: data.robot_state.operational ?? true,
@@ -113,6 +133,9 @@ export const useRobotControl = () => {
           else if (data.robot_state) {
             robotState.value = {
               battery: data.robot_state.battery || 0,
+              battery_voltage: data.robot_state.battery_voltage || 0.0,
+              rpm_motor1: data.robot_state.rpm_motor1 || 0.0,
+              rpm_motor2: data.robot_state.rpm_motor2 || 0.0,
               gps: data.robot_state.gps || robotState.value.gps,
               speed: data.robot_state.speed || 0,
               operational: data.robot_state.operational ?? true,
@@ -163,6 +186,9 @@ export const useRobotControl = () => {
       if (data.robot_state) {
         robotState.value = {
           battery: data.robot_state.battery || 0,
+          battery_voltage: data.robot_state.battery_voltage || 0.0,
+          rpm_motor1: data.robot_state.rpm_motor1 || 0.0,
+          rpm_motor2: data.robot_state.rpm_motor2 || 0.0,
           gps: data.robot_state.gps || robotState.value.gps,
           speed: data.robot_state.speed || 0,
           operational: data.robot_state.operational ?? data.robot_state.connected ?? false,
@@ -178,18 +204,33 @@ export const useRobotControl = () => {
 
   /**
    * Inicia el polling del estado del robot cada 5 segundos
+   * SOLO se usa cuando WebSocket NO está conectado
    */
   const startHealthPolling = () => {
+    // No iniciar polling si WebSocket está conectado
+    if (isConnected.value) {
+      console.log('🚫 No se inicia HTTP polling: WebSocket ya conectado')
+      return
+    }
+
     // Detener polling anterior si existe
     stopHealthPolling()
+
+    console.log('🔄 Iniciando HTTP polling (WebSocket no disponible)')
 
     // Obtener el estado inmediatamente
     fetchRobotHealth()
 
     // Configurar polling cada 5 segundos (reducido para evitar interferencia)
     healthPollInterval = setInterval(() => {
+      // Detener polling si WebSocket se conecta
+      if (isConnected.value) {
+        console.log('🛑 HTTP polling detenido: WebSocket conectado')
+        stopHealthPolling()
+        return
+      }
       fetchRobotHealth()
-    }, 5000)  // Cambiado de 1000ms a 5000ms
+    }, 1000)  // Cambiado de 1000ms a 5000ms
   }
 
   /**

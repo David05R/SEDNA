@@ -60,6 +60,11 @@ function updateGamepad() {
 }
 
 onMounted(() => {
+  // Conectar WebSocket automáticamente al entrar en modo LONG
+  if (!wsConnected.value) {
+    connect()
+  }
+
   timeTimer = window.setInterval(() => {
     timeStr.value = new Date().toLocaleTimeString()
     // Demo: variar heading levemente (hasta que tengamos cálculo real desde GPS)
@@ -68,7 +73,7 @@ onMounted(() => {
 
   window.addEventListener('gamepadconnected', () => {
     gamepadConnected.value = true
-    // Auto-conectar WebSocket cuando se conecta el gamepad
+    // Auto-conectar WebSocket cuando se conecta el gamepad (si no está ya conectado)
     if (!wsConnected.value) {
       connect()
     }
@@ -132,6 +137,7 @@ function compassStyle() {
             </div>
             <div class="text-xs">{{ robotState.battery }}%</div>
           </div>
+          <div class="text-[10px] text-neutral-400 mt-0.5">{{ robotState.battery_voltage?.toFixed(2) || '0.00' }}V</div>
         </div>
 
         <!-- Hora local -->
@@ -140,10 +146,11 @@ function compassStyle() {
           <div class="text-xs">{{ timeStr }}</div>
         </div>
 
-        <!-- Velocidad del Robot -->
+        <!-- Velocidad del Robot (RPM promedio) -->
         <div class="bg-neutral-900/60 rounded-md backdrop-blur ring-1 ring-neutral-700 p-2">
           <div class="text-[11px] text-neutral-300">Velocidad</div>
-          <div class="text-xs">{{ robotState.speed }} m/s</div>
+          <div class="text-xs">{{ Math.round((robotState.rpm_motor1 + robotState.rpm_motor2) / 2) || 0 }} RPM</div>
+          <div class="text-[10px] text-neutral-400 mt-0.5">M1: {{ robotState.rpm_motor1?.toFixed(0) || 0 }} | M2: {{ robotState.rpm_motor2?.toFixed(0) || 0 }}</div>
         </div>
 
         <!-- Gamepad -->

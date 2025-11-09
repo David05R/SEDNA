@@ -200,9 +200,11 @@ class MotorController:
     def cleanup(self):
         """Limpia y detiene los motores"""
         logger.info("🧹 Limpiando motor controller")
+
+        # Paso 1: Detener todo movimiento inmediatamente
         self.stop()
 
-        # Liberar explícitamente los pines PWM primero
+        # Paso 2: Liberar explícitamente los pines PWM
         try:
             for pin in [L_LPWM, L_RPWM, R_LPWM, R_RPWM]:
                 wiringpi.softPwmWrite(pin, 0)
@@ -211,13 +213,22 @@ class MotorController:
         except Exception as e:
             logger.debug(f"softPwmStop: {e}")
 
-        # Deshabilitar motores
+        # Paso 3: Deshabilitar motores
         self.disable()
 
-        # Liberar pines como INPUT
+        # Paso 4: Resetear pines a INPUT para liberar completamente
         try:
-            for pin in [L_LPWM, L_RPWM, R_LPWM, R_RPWM, EN_MOTORES]:
+            for pin in [L_LPWM, L_RPWM, R_LPWM, R_RPWM]:
                 wiringpi.pinMode(pin, 0)  # INPUT mode
+                wiringpi.pullUpDnControl(pin, 0)  # Desactivar pull-up/down
+
+            # Enable también a INPUT
+            wiringpi.pinMode(EN_MOTORES, 0)
             logger.info("✅ Pines GPIO liberados completamente")
         except Exception as e:
             logger.error(f"❌ Error liberando pines: {e}")
+
+        # Paso 5: Resetear flags internos
+        self.initialized = False
+        self.enabled = False
+        logger.info("✅ Motor controller completamente limpio")

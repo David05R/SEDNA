@@ -26,6 +26,10 @@ let uptimeTimer = null
 const startTime = Date.now()
 
 onMounted(() => {
+  // Conectar WebSocket para recibir telemetría en tiempo real
+  const { connect, disconnect } = useRobotControl()
+  connect()
+
   uptimeTimer = setInterval(() => {
     const elapsed = Math.floor((Date.now() - startTime) / 1000)
     const hours = Math.floor(elapsed / 3600).toString().padStart(2, '0')
@@ -33,6 +37,12 @@ onMounted(() => {
     const seconds = (elapsed % 60).toString().padStart(2, '0')
     additionalData.value.uptime = `${hours}:${minutes}:${seconds}`
   }, 1000)
+
+  // Limpiar al desmontar
+  onBeforeUnmount(() => {
+    if (uptimeTimer) clearInterval(uptimeTimer)
+    disconnect()
+  })
 })
 
 onBeforeUnmount(() => {
@@ -107,7 +117,10 @@ onBeforeUnmount(() => {
           </div>
           <div class="bg-neutral-900/60 rounded-md p-3 ring-1 ring-neutral-700/60">
             <div class="text-xs text-neutral-400">Velocidad</div>
-            <div class="mt-1 font-medium">{{ robotState.speed }} m/s</div>
+            <div class="mt-1 font-medium">{{ Math.round((robotState.rpm_motor1 + robotState.rpm_motor2) / 2) || 0 }} RPM</div>
+            <div class="text-[10px] text-neutral-500 mt-0.5">
+              M1: {{ robotState.rpm_motor1?.toFixed(0) || 0 }} | M2: {{ robotState.rpm_motor2?.toFixed(0) || 0 }}
+            </div>
           </div>
         </div>
 
@@ -115,7 +128,7 @@ onBeforeUnmount(() => {
         <div class="mb-4">
           <div class="flex items-center justify-between mb-1">
             <span class="text-sm">Batería</span>
-            <span class="text-sm text-neutral-300">{{ robotState.battery }}%</span>
+            <span class="text-sm text-neutral-300">{{ robotState.battery }}% ({{ robotState.battery_voltage?.toFixed(2) || '0.00' }}V)</span>
           </div>
           <div class="h-2 bg-neutral-700 rounded">
             <div class="h-2 rounded bg-emerald-500" :style="{ width: robotState.battery + '%' }" />

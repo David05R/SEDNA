@@ -18,8 +18,10 @@ from datetime import datetime
 import logging
 import serial
 
-# Importar módulo de control de motores (solo para WebSocket)
+# Importar módulos de control
 from motor_controller import MotorController
+from ibus_controller import IBusController
+from esp32_reader import ESP32Reader
 
 # Configurar logging
 logging.basicConfig(
@@ -127,7 +129,10 @@ class MinimalManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
         self.robot_state = {
-            "battery": 58,
+            "battery": 0,  # Actualizado desde ESP32
+            "battery_voltage": 0.0,  # Voltaje real
+            "rpm_motor1": 0.0,  # RPM encoder 1
+            "rpm_motor2": 0.0,  # RPM encoder 2
             "gps": {"lat": None, "lng": None},
             "speed": 0,
             "operational": False,
@@ -138,12 +143,17 @@ class MinimalManager:
         # Modo actual
         self.current_mode = "idle"
 
-        # Proceso de test_gpio.py
-        self.gpio_process = None
-
-        # Controlador de motores (solo para modo LONG, inicializado bajo demanda)
+        # Controlador de motores (compartido entre LONG y SHORT)
         self.motor_controller = None
         self.motor_controller_initialized = False
+
+        # Controlador iBus para modo SHORT
+        self.ibus_controller = None
+        self.ibus_task = None  # Task asyncio para loop iBus
+
+        # Lector de ESP32 (encoders + batería)
+        self.esp32_reader = None
+        self.esp32_task = None  # Task asyncio para lectura ESP32
 
     async def set_mode_async(self, mode: str):
         """Cambia el modo de operación (versión async)"""
@@ -153,24 +163,21 @@ class MinimalManager:
 
         logger.info(f"🔄 Cambiando modo: {self.current_mode} → {mode}")
 
-        # Detener todo primero
-        self.stop_gpio_process()
-        self.cleanup_motor_controller()
+        # Detener loop iBus si está activo
+        await self.stop_ibus_loop()
 
-        # IMPORTANTE: Esperar a que GPIO se libere completamente
-        if self.current_mode == "long" and mode == "short":
-            logger.info("⏳ Esperando 1s para liberar GPIO completamente...")
-            await asyncio.sleep(1.0)  # Aumentado a 1 segundo
-
-            # Reset adicional: matar cualquier proceso python residual
-            try:
-                logger.info("🔧 Limpiando procesos Python residuales...")
-                # Solo matar procesos test_gpio.py específicamente
-                subprocess.run(['sudo', 'pkill', '-9', '-f', 'test_gpio.py'],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
-            except Exception as e:
-                logger.debug(f"pkill: {e}")
+        # Gestión del motor_controller
+        if mode == "idle":
+            # IDLE: Limpiar todo
+            logger.info("🧹 Limpiando para modo IDLE...")
+            self.cleanup_motor_controller()
+            if self.ibus_controller:
+                self.ibus_controller.disconnect()
+                self.ibus_controller = None
+        else:
+            # SHORT o LONG: Asegurar que motor_controller existe
+            if not self.motor_controller_initialized:
+                self.init_motor_controller()
 
         # Actualizar modo
         self.current_mode = mode
@@ -179,11 +186,13 @@ class MinimalManager:
 
         # Iniciar según el modo
         if mode == "short":
-            logger.info("📡 Modo SHORT: Iniciando test_gpio.py (control RF)")
-            self.start_gpio_process()
+            logger.info("📡 Modo SHORT: Iniciando loop iBus interno")
+            await self.start_ibus_loop()
         elif mode == "long":
-            logger.info("🌐 Modo LONG: Iniciando motor_controller (WebSocket)")
-            self.init_motor_controller()
+            logger.info("🌐 Modo LONG: Control WebSocket activo")
+            # WebSocket ya está manejado, solo asegurar motores habilitados
+            if self.motor_controller:
+                self.motor_controller.enable()
         else:
             logger.info("⏸️ Modo IDLE: Todo detenido")
 
@@ -194,53 +203,79 @@ class MinimalManager:
         # Crear una tarea async
         asyncio.create_task(self.set_mode_async(mode))
 
-    def start_gpio_process(self):
-        """Inicia test_gpio.py como proceso separado"""
-        if self.gpio_process is not None:
-            logger.warning("⚠️ test_gpio.py ya está corriendo")
+    async def start_ibus_loop(self):
+        """Inicia el loop de control iBus (modo SHORT)"""
+        if self.ibus_task is not None:
+            logger.warning("⚠️ Loop iBus ya está activo")
             return
 
-        try:
-            # Ejecutar test_gpio.py con sudo
-            logger.info("🚀 Iniciando test_gpio.py...")
-            self.gpio_process = subprocess.Popen(
-                ['sudo', 'python3', '/home/orangepi/robot-hmi/backend/test_gpio.py'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)
-            )
-            logger.info(f"✅ test_gpio.py iniciado (PID: {self.gpio_process.pid})")
+        # Crear controlador iBus si no existe
+        if self.ibus_controller is None:
+            self.ibus_controller = IBusController()
 
-        except Exception as e:
-            logger.error(f"❌ Error iniciando test_gpio.py: {e}")
-            self.gpio_process = None
-
-    def stop_gpio_process(self):
-        """Detiene el proceso test_gpio.py"""
-        if self.gpio_process is None:
+        # Conectar
+        if not self.ibus_controller.connect():
+            logger.error("❌ No se pudo conectar al receptor iBus")
             return
 
+        # Crear task para el loop
+        self.ibus_task = asyncio.create_task(self.ibus_control_loop())
+        logger.info("✅ Loop iBus iniciado")
+
+    async def stop_ibus_loop(self):
+        """Detiene el loop de control iBus"""
+        if self.ibus_task is None:
+            return
+
+        logger.info("🛑 Deteniendo loop iBus...")
+
+        # Cancelar task
+        self.ibus_task.cancel()
+
         try:
-            logger.info(f"🛑 Deteniendo test_gpio.py (PID: {self.gpio_process.pid})...")
+            await self.ibus_task
+        except asyncio.CancelledError:
+            pass
 
-            # Enviar SIGTERM
-            self.gpio_process.terminate()
+        self.ibus_task = None
+        logger.info("✅ Loop iBus detenido")
 
-            # Esperar hasta 2 segundos
-            try:
-                self.gpio_process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                # Si no se detuvo, forzar con SIGKILL
-                logger.warning("⚠️ Proceso no respondió a SIGTERM, enviando SIGKILL")
-                self.gpio_process.kill()
-                self.gpio_process.wait()
+    async def ibus_control_loop(self):
+        """Loop principal de control iBus"""
+        logger.info("🎮 Loop iBus activo - esperando comandos del control RF")
 
-            logger.info("✅ test_gpio.py detenido")
-            self.gpio_process = None
+        try:
+            while True:
+                # Leer canales
+                channels = await asyncio.to_thread(self.ibus_controller.get_channels)
 
+                if channels and len(channels) >= 2:
+                    ch1 = channels[0]  # Dirección
+                    ch2 = channels[1]  # Velocidad
+
+                    # Convertir a PWM usando el método del motor_controller
+                    L_pwm, R_pwm, direction = self.motor_controller.process_ibus_command(ch2, ch1)
+
+                    # Mover motores
+                    self.motor_controller.move_differential(L_pwm, R_pwm, direction)
+
+                    # Actualizar velocidad en robot_state
+                    self.robot_state["speed"] = max(L_pwm, R_pwm)
+
+                # Pequeña pausa para no saturar CPU
+                await asyncio.sleep(0.001)
+
+        except asyncio.CancelledError:
+            logger.info("ℹ️ Loop iBus cancelado")
+            # Detener motores al cancelar
+            if self.motor_controller:
+                self.motor_controller.stop()
+            raise
         except Exception as e:
-            logger.error(f"❌ Error deteniendo test_gpio.py: {e}")
-            self.gpio_process = None
+            logger.error(f"❌ Error en loop iBus: {e}")
+            # Detener motores en caso de error
+            if self.motor_controller:
+                self.motor_controller.stop()
 
     def init_motor_controller(self):
         """Inicializa el motor controller (solo para modo LONG)"""
@@ -310,10 +345,92 @@ class MinimalManager:
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         await websocket.send_json(message)
 
+    async def start_esp32_reader(self):
+        """Inicia la lectura de la ESP32"""
+        if self.esp32_task is not None:
+            logger.warning("⚠️ ESP32 reader ya está activo")
+            return
+
+        # Crear lector si no existe
+        if self.esp32_reader is None:
+            self.esp32_reader = ESP32Reader()
+
+        # Conectar
+        if not self.esp32_reader.connect():
+            logger.error("❌ No se pudo conectar a la ESP32")
+            return
+
+        # Crear task para lectura continua
+        self.esp32_task = asyncio.create_task(self.esp32_read_loop())
+        logger.info("✅ ESP32 reader iniciado")
+
+    async def stop_esp32_reader(self):
+        """Detiene la lectura de la ESP32"""
+        if self.esp32_task is None:
+            return
+
+        logger.info("🛑 Deteniendo ESP32 reader...")
+
+        # Cancelar task
+        self.esp32_task.cancel()
+
+        try:
+            await self.esp32_task
+        except asyncio.CancelledError:
+            pass
+
+        self.esp32_task = None
+        logger.info("✅ ESP32 reader detenido")
+
+    async def esp32_read_loop(self):
+        """Loop de lectura de ESP32"""
+        logger.info("📡 ESP32 read loop activo")
+
+        try:
+            while True:
+                # Leer datos de ESP32
+                updated = await asyncio.to_thread(self.esp32_reader.update)
+
+                if updated:
+                    # Obtener telemetría
+                    data = self.esp32_reader.get_telemetry()
+
+                    # Actualizar robot_state
+                    self.robot_state["rpm_motor1"] = data["rpm_motor1"]
+                    self.robot_state["rpm_motor2"] = data["rpm_motor2"]
+                    self.robot_state["battery_voltage"] = data["battery_voltage"]
+                    self.robot_state["battery"] = self.esp32_reader.get_battery_percentage()
+
+                # Leer cada 100ms
+                await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            logger.info("ℹ️ ESP32 read loop cancelado")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error en ESP32 read loop: {e}")
+
     def cleanup(self):
         """Limpia recursos"""
         logger.info("🧹 Limpiando recursos")
-        self.stop_gpio_process()
+
+        # Detener loop iBus si está activo
+        if self.ibus_task:
+            self.ibus_task.cancel()
+
+        # Detener ESP32 reader
+        if self.esp32_task:
+            self.esp32_task.cancel()
+
+        # Desconectar iBus
+        if self.ibus_controller:
+            self.ibus_controller.disconnect()
+
+        # Desconectar ESP32
+        if self.esp32_reader:
+            self.esp32_reader.disconnect()
+
+        # Limpiar motor controller
         self.cleanup_motor_controller()
 
 
@@ -371,8 +488,9 @@ async def get_status():
         "timestamp": datetime.now().isoformat(),
         "robot": manager.robot_state,
         "current_mode": manager.current_mode,
-        "gpio_running": manager.gpio_process is not None,
-        "gpio_pid": manager.gpio_process.pid if manager.gpio_process else None,
+        "ibus_loop_active": manager.ibus_task is not None,
+        "motor_controller_initialized": manager.motor_controller_initialized,
+        "ibus_connected": manager.ibus_controller is not None and manager.ibus_controller.ser is not None,
     }
 
 
@@ -399,6 +517,9 @@ async def websocket_control(websocket: WebSocket):
                     "type": "telemetry",
                     "robot_state": {
                         "battery": manager.robot_state["battery"],
+                        "battery_voltage": manager.robot_state["battery_voltage"],
+                        "rpm_motor1": manager.robot_state["rpm_motor1"],
+                        "rpm_motor2": manager.robot_state["rpm_motor2"],
                         "gps": manager.robot_state["gps"],
                         "speed": manager.robot_state["speed"],
                         "mode": manager.robot_state["mode"],
@@ -407,7 +528,7 @@ async def websocket_control(websocket: WebSocket):
                     },
                     "timestamp": datetime.now().isoformat(),
                 }, websocket)
-                await asyncio.sleep(2)  # Cada 2 segundos
+                await asyncio.sleep(0.5)  # Cada 500ms para telemetría más rápida
         except Exception:
             pass
 
@@ -443,11 +564,15 @@ async def websocket_control(websocket: WebSocket):
 @app.on_event("startup")
 async def startup_event():
     logger.info("🚀 Robot SEDNA API Minimal iniciada")
-    logger.info("📡 Modo SHORT: Ejecuta test_gpio.py")
+    logger.info("📡 Modo SHORT: Loop iBus interno")
     logger.info("📡 Modo LONG: WebSocket + motor_controller")
 
+    # Iniciar GPS reader
     if gps is not None:
         asyncio.create_task(gps_reader_task())
+
+    # Iniciar ESP32 reader (encoders + batería)
+    await manager.start_esp32_reader()
 
 
 @app.on_event("shutdown")
